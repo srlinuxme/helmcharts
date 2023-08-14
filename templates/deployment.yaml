@@ -1,0 +1,282 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "peertube.fullname" . }}
+  labels:
+    app: {{ template "peertube.name" . }}
+    chart: {{ template "peertube.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "peertube.name" . }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "peertube.name" . }}
+        release: {{ .Release.Name }}
+    spec:
+      initContainers:
+        - name: peertube-init
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config
+            - mountPath: /init
+              name: peertube-init
+              readOnly: true
+            - name: peertubeassets
+              mountPath: /assets
+          command:
+            - sh
+            - /init/peertube-init.sh
+{{- if .Values.chowncontainer.enabled }}
+        - name: peertube-chown
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config
+            - mountPath: /init
+              name: peertube-chown
+              readOnly: true
+          command:
+            - sh
+            - /init/peertube-chown.sh
+{{- end }}
+      containers:
+{{- if .Values.nginxproxy.enabled }}
+        - name: nginx-proxy
+          image: "{{ .Values.nginxproxy.image.repository }}:{{ .Values.nginxproxy.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ports.nginxproxyPort }}
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 300
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+          volumeMounts:
+            - name: nginxtemp
+              mountPath: /nginxtemp
+            - mountPath: /etc/nginx/conf.d
+              name: nginx-proxyconf
+              readOnly: true
+            - name: peertubeassets
+              mountPath: /assets
+              readOnly: true
+            - name: data
+              mountPath: /data
+{{- end }}
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+{{- if .Values.nginxproxy.enabled }}
+{{- if .Values.ports.livePort }}
+          ports:
+          - name: live
+            containerPort: {{ .Values.ports.livePort }}
+            protocol: TCP
+{{- end }}
+          startupProbe:
+            httpGet:
+              path: /
+              port: 9000
+            initialDelaySeconds: 60
+            failureThreshold: 3000
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 9000
+            initialDelaySeconds: 600
+            failureThreshold: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9000
+            initialDelaySeconds: 300
+            failureThreshold: 3
+            periodSeconds: 10
+{{- else }}
+          ports:
+          - name: http
+            containerPort: {{ .Values.ports.peertubePort }}
+            protocol: TCP
+{{- if .Values.ports.livePort }}
+          - name: live
+            containerPort: {{ .Values.ports.livePort }}
+            protocol: TCP
+{{- end }}
+          startupProbe:
+            httpGet:
+              path: /
+              port: 9000
+            initialDelaySeconds: 60
+            failureThreshold: 3000
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 600
+            failureThreshold: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            failureThreshold: 3
+            periodSeconds: 10
+{{- end }}
+          command:
+            - gosu
+            - peertube
+            - npm
+            - start
+          env:
+            - name: PEERTUBE_WEBSERVER_HOSTNAME
+              value: {{ .Values.environment.hostname }}
+            - name: PEERTUBE_WEBSERVER_PORT
+              value: {{ .Values.environment.http | quote }}
+            - name: PEERTUBE_WEBSERVER_HTTPS
+              value: {{ .Values.environment.httpsEnabled | quote }}
+            - name: PEERTUBE_DB_HOSTNAME
+              value: {{ .Values.environment.dbHostname }}
+            - name: PEERTUBE_DB_USERNAME
+              value: {{ .Values.environment.dbUser }}
+            - name: PEERTUBE_DB_PASSWORD
+              value: {{ .Values.environment.dbPassword }}
+            - name: PEERTUBE_REDIS_HOSTNAME
+              value: {{ .Values.environment.redisHostname }}
+            - name: PEERTUBE_REDIS_AUTH
+              value: {{ .Values.environment.redisAuth }}
+            - name: PEERTUBE_SMTP_USERNAME
+              value: {{ .Values.environment.smtpUser | quote }}
+            - name: PEERTUBE_SMTP_PASSWORD
+              value: {{ .Values.environment.smtpPassword }}
+            - name: PEERTUBE_SMTP_HOSTNAME
+              value: {{ .Values.environment.smtpHostname }}
+            - name: PEERTUBE_SMTP_PORT
+              value: {{ .Values.environment.smtpPort | quote }}
+            - name: PEERTUBE_SMTP_FROM
+              value: {{ .Values.environment.smtpFrom | quote }}
+            - name: PEERTUBE_SMTP_TLS
+              value: {{ .Values.environment.smtpTls | quote }}
+            - name: PEERTUBE_ADMIN_EMAIL
+              value: {{ .Values.environment.admin | quote }}
+            - name: PEERTUBE_TRANSCODING_ENABLED
+              value: {{ .Values.environment.transcoding | quote }}
+            - name: PEERTUBE_SECRET
+              value: {{ .Values.environment.peertube_secret | quote }}
+            # OBJECT STORAGE CONFIG
+            {{- if .Values.object_storage.enabled }}
+            - name: PEERTUBE_OBJECT_STORAGE_ENABLED
+              value: {{ .Values.object_storage.enabled | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_ENDPOINT
+              value: {{ .Values.object_storage.endpoint | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_REGION
+              value: {{ .Values.object_storage.region | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_CREDENTIALS_ACCESS_KEY_ID
+              value: {{ .Values.object_storage.credentials.access_key_id | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_CREDENTIALS_SECRET_ACCESS_KEY
+              value: {{ .Values.object_storage.credentials.secret_access_key | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_MAX_UPLOAD_PART
+              value: {{ .Values.object_storage.max_upload_part | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_STREAMING_PLAYLISTS_BUCKET_NAME
+              value: {{ .Values.object_storage.streaming_playlists.bucket_name | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_STREAMING_PLAYLISTS_PREFIX
+              value: {{ .Values.object_storage.streaming_playlists.prefix | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_STREAMING_PLAYLISTS_BASE_URL
+              value: {{ .Values.object_storage.streaming_playlists.base_url | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_UPLOAD_ACL
+              value: {{ .Values.object_storage.streaming_playlists.upload_acl | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_VIDEOS_BUCKET_NAME
+              value: {{ .Values.object_storage.videos.bucket_name | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_VIDEOS_PREFIX
+              value: {{ .Values.object_storage.videos.prefix | quote }}
+            - name: PEERTUBE_OBJECT_STORAGE_VIDEOS_BASE_URL
+              value: {{ .Values.object_storage.videos.base_url | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+    {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+      volumes:
+{{- if .Values.persistence.data.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.data.existingClaim }}
+{{- else }}
+        - name: data
+          emptyDir: {}
+{{- end }}
+{{- if .Values.persistence.config.enabled }}
+        - name: config
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.config.existingClaim }}
+{{- else }}
+        - name: config
+          emptyDir: {}
+{{- end }}
+{{- if .Values.nginxproxy.persistence.enabled }}
+        - name: nginxtemp
+          persistentVolumeClaim:
+            claimName: {{ .Values.nginxproxy.persistence.existingClaim }}
+{{- else }}
+        - name: nginxtemp
+          emptyDir: {}
+{{- end }}
+        - name: peertubeassets
+          emptyDir: {}
+        - configMap:
+            defaultMode: 420
+            name: nginx-proxyconf
+          name: nginx-proxyconf
+        - configMap:
+            defaultMode: 420
+            name: peertube-init
+          name: peertube-init
+        - configMap:
+            defaultMode: 420
+            name: peertube-chown
+          name: peertube-chown

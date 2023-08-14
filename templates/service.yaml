@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "peertube.fullname" . }}
+  labels:
+    app: {{ template "peertube.name" . }}
+    chart: {{ template "peertube.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+{{- if .Values.nginxproxy.enabled }}
+    - port: {{ .Values.ports.nginxproxyPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+{{- else }}
+    - port: {{ .Values.ports.peertubePort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+{{- end }}
+{{- if .Values.ports.livePort }}
+    - port: {{ .Values.ports.livePort }}
+      targetPort: {{ .Values.ports.livePort }}
+      protocol: TCP
+      name: live
+{{- end }}
+  selector:
+    app: {{ template "peertube.name" . }}
+    release: {{ .Release.Name }}

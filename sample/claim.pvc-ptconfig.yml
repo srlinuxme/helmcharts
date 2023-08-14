@@ -1,0 +1,11 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc-ptconfig-prod
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ChangeMeStorageClass
+  resources:
+    requests:
+      storage: 200Mi

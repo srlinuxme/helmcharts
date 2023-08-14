@@ -1,0 +1,132 @@
+---
+# Default values for peertube.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: chocobozzz/peertube
+  tag: v4.0.0-bullseye
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+
+ports:
+  # peertubePort should be the same than the port in your Peertube production.yml configuration. Default to 9000
+  # nginxproxyPort is used only when nginx-proxy is enabled, and should be different from the Peertube port.
+  # peertubePort is exposed outside of the pod, except if nginx-proxy is enabled, in this case it's the nginxproxyPort that is exposed
+  # The chart uses the correct port for service and ingress according to configuration
+  peertubePort: 9000
+  nginxproxyPort: 9001
+  # livePort is a directly exposed TCP port used for the live streaming feature.
+  # Should match your live configuration in production.yml, and default to 1935
+  livePort: 1935
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: haproxy
+    kubernetes.io/tls-acme: "true"
+    certmanager.k8s.io/cluster-issuer: your-certmanager
+  path: /
+  hosts:
+    - peertube.domain.tld
+  tls:
+    - secretName: crt-peertube.domain.tld
+      hosts:
+        - peertube.domain.tld
+
+# At start chowncontainer check every video files and chown it to peertube user.
+# If you have lots of videos, it may take age.
+# If you are sure your rights are ok, you may disable this container to speed up start.
+chowncontainer:
+  enabled: true
+
+resources:
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  requests:
+    cpu: 3
+    memory: 6Gi
+
+nodeSelector: {}
+
+tolerations: []
+
+# NodeAffinity is useful if you want to specify some nodes for Peertube, eg nodes with high CPU for encoding for example
+#affinity:
+#  nodeAffinity:
+#    preferredDuringSchedulingIgnoredDuringExecution:
+#      - weight: 1
+#        preference:
+#          matchExpressions:
+#            - key: kubernetes.io/hostname
+#              operator: In
+#              values:
+#                - yournodes.domain.tld
+
+# PVC are not handled by helm, you need to create both config and data volume before launching the helm
+persistence:
+  data:
+    enabled: true
+    existingClaim: pvc-pt-prod
+  config:
+    enabled: true
+    existingClaim: pvc-ptconfig-prod
+
+environment:
+  hostname: peertube.domain.tld
+  http: 443
+  httpsEnabled: true
+  dbHostname: your.postgresql.hostname
+  dbUser: peertube
+  dbPassword: postgres
+  redisHostname: redis
+  redisAuth: oUkqFtwy2m
+  # smtpUser: peertube@peertube.domain.tld
+  # smtpPassword: smtppassword
+  # smtpHostname: smtp.peertube.domain.tld
+  # smtpPort: 465
+  # smtpFrom: peertube@peertube.domain.tld
+  # smtpTls: true
+  admin: peertube@peertube.domain.tld
+  transcoding: true
+  peertube_secret: 911131d13b2c8deeecf7c6390a0b421b20e26d1c2d60b941272e5e0e25a942cd
+
+# WARNING nginxproxy is not compatible with live at the moment
+# Because it search .../streaming-playlists/... in URL path directly in filesystem path
+# and if you use .../streaming_playlists/... on filesystem, live is broken (notice the - vs _)
+nginxproxy:
+  enabled: false
+  image:
+    repository: nginx
+    tag: 1.17.9
+  maxbodysize: 8G
+  # When uploading, temporary space is needed equal to the total size of all concurrent uploads.
+  # It could be a good idea to use an outside docker storage (eg: pvc in k8s) for these files
+  persistence:
+    enabled: false
+    existingClaim: pvc-nginx-proxy
+
+# Config object storage
+object_storage:
+  enabled: false
+  endpoint: ""
+  region: ""
+  credentials:
+    access_key_id: ""
+    secret_access_key: ""
+  max_upload_part: ""
+  videos:
+    bucket_name: ""
+    prefix: ""
+    base_url: ""
+  streaming_playlists:
+    bucket_name: ""
+    prefix: ""
+    base_url: ""
+    upload_acl: ""
